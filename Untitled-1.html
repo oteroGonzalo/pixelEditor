@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Editor de Píxeles con Zoom e Información al Cursor</title>
+  <style>
+    canvas {
+      border: 1px solid #ccc;
+      cursor: crosshair;
+      transform-origin: 0 0;
+    }
+    /* Contenedor de información flotante */
+    #hoverInfo {
+      position: absolute;
+      pointer-events: none;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid #000;
+      padding: 5px;
+      font-family: monospace;
+      white-space: pre;
+      display: none;
+      z-index: 100;
+    }
+    form {
+      margin-top: 20px;
+    }
+    form label {
+      margin-right: 5px;
+    }
+    form input,
+    form select {
+      margin-right: 10px;
+    }
+    #zoomContainer {
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Carga de imagen y selector de color -->
+  <label for="fileInput">Subir imagen:</label>
+  <input type="file" id="fileInput" accept="image/*">
+  <label for="colorPicker">Elegir color:</label>
+  <input type="color" id="colorPicker" value="#ff0000">
+  <br><br>
+  
+  <!-- Zoom -->
+  <div id="zoomContainer">
+    <label for="zoomSlider">Zoom:</label>
+    <input type="range" id="zoomSlider" min="1" max="8" step="0.1" value="1">
+    <span id="zoomValue">1x</span>
+  </div>
+  
+
+  
+  <!-- Información flotante al pasar el ratón (se muestra cerca del cursor) -->
+  <div id="hoverInfo"></div>
+  
+  <!-- Formulario para cambiar el color completo de un píxel -->
+  <form id="pixelForm">
+    <label for="pixelX">Píxel X:</label>
+    <input type="number" id="pixelX" required>
+    <label for="pixelY">Píxel Y:</label>
+    <input type="number" id="pixelY" required>
+    <button type="submit">Cambiar color del píxel</button>
+  </form>
+
+  <!-- Formulario para cambiar el color de una fila o columna completa -->
+  <form id="lineColumnForm">
+    <label for="modeSelect">Modo:</label>
+    <select id="modeSelect">
+      <option value="row">Fila (Línea Horizontal)</option>
+      <option value="column">Columna (Línea Vertical)</option>
+    </select>
+    <label for="coordinateInput">Coordenada:</label>
+    <input type="number" id="coordinateInput" required>
+    <button type="submit">Cambiar color</button>
+  </form>
+
+  <!-- Formulario para cambiar un solo componente de color de un píxel -->
+  <form id="componentForm">
+    <h3>Cambiar un Componente de Color Individual</h3>
+    <label for="compPixelX">Píxel X:</label>
+    <input type="number" id="compPixelX" required>
+    <label for="compPixelY">Píxel Y:</label>
+    <input type="number" id="compPixelY" required>
+    <label for="componentSelect">Componente:</label>
+    <select id="componentSelect">
+      <option value="red">Rojo</option>
+      <option value="green">Verde</option>
+      <option value="blue">Azul</option>
+      <option value="alpha">Alfa</option>
+    </select>
+    <label for="componentValue">Valor (0-255):</label>
+    <input type="number" id="componentValue" min="0" max="255" required>
+    <button type="submit">Actualizar componente</button>
+  </form>
+
+    <!-- Lienzo para mostrar la imagen -->
+    <canvas id="canvas"></canvas>
+
+  <script>
+    // Referencias al DOM
+    const fileInput = document.getElementById('fileInput');
+    const colorPicker = document.getElementById('colorPicker');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const hoverInfo = document.getElementById('hoverInfo');
+    const zoomSlider = document.getElementById('zoomSlider');
+    const zoomValue = document.getElementById('zoomValue');
+
+    const pixelForm = document.getElementById('pixelForm');
+    const pixelX = document.getElementById('pixelX');
+    const pixelY = document.getElementById('pixelY');
+
+    const lineColumnForm = document.getElementById('lineColumnForm');
+    const modeSelect = document.getElementById('modeSelect');
+    const coordinateInput = document.getElementById('coordinateInput');
+
+    const componentForm = document.getElementById('componentForm');
+    const compPixelX = document.getElementById('compPixelX');
+    const compPixelY = document.getElementById('compPixelY');
+    const componentSelect = document.getElementById('componentSelect');
+    const componentValue = document.getElementById('componentValue');
+
+    let zoomFactor = 1; // Zoom por defecto
+
+    // Actualizar zoom
+    zoomSlider.addEventListener('input', (e) => {
+      zoomFactor = parseFloat(e.target.value);
+      canvas.style.transform = `scale(${zoomFactor})`;
+      zoomValue.textContent = zoomFactor + "x";
+    });
+
+    // Cargar imagen
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        const img = new Image();
+        img.onload = function() {
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+        }
+        img.src = evt.target.result;
+      }
+      reader.readAsDataURL(file);
+    });
+
+    // Función para obtener las coordenadas lógicas (sin zoom)
+    function getLogicalCoordinates(e) {
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.floor((e.clientX - rect.left) / zoomFactor);
+      const y = Math.floor((e.clientY - rect.top) / zoomFactor);
+      return { x, y };
+    }
+
+    // Actualizar la información flotante cerca del cursor
+    canvas.addEventListener('mousemove', (e) => {
+      const { x, y } = getLogicalCoordinates(e);
+      if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) {
+        hoverInfo.style.display = "none";
+        return;
+      }
+      const imgData = ctx.getImageData(x, y, 1, 1);
+      const r = imgData.data[0],
+            g = imgData.data[1],
+            b = imgData.data[2],
+            a = imgData.data[3];
+      
+      // Actualizar contenido de hoverInfo
+      hoverInfo.textContent = `(${x}, ${y})\nR: ${r} G: ${g}\nB: ${b} A: ${a}`;
+      
+      // Posicionar hoverInfo cerca del cursor con un pequeño offset
+      hoverInfo.style.left = e.clientX + 10 + "px";
+      hoverInfo.style.top = e.clientY + 10 + "px";
+      hoverInfo.style.display = "block";
+    });
+
+    canvas.addEventListener('mouseout', () => {
+      hoverInfo.style.display = "none";
+    });
+
+    // Función para convertir un número a dos dígitos hexadecimales
+    function toHex(n) {
+      return ("0" + n.toString(16)).slice(-2);
+    }
+
+    // Función para poblar los formularios con la información del píxel en (x, y)
+    function populateForms(x, y) {
+      const imgData = ctx.getImageData(x, y, 1, 1);
+      const r = imgData.data[0],
+            g = imgData.data[1],
+            b = imgData.data[2],
+            a = imgData.data[3];
+      // Convertir a valor hexadecimal (ignorando alfa)
+      const hexColor = "#" + toHex(r) + toHex(g) + toHex(b);
+      // Actualizar el selector de color
+      colorPicker.value = hexColor;
+      // Poblar los formularios de píxel
+      pixelX.value = x;
+      pixelY.value = y;
+      compPixelX.value = x;
+      compPixelY.value = y;
+    }
+
+    // Al hacer clic en el lienzo, poblar los formularios con la información del píxel
+    canvas.addEventListener('click', (e) => {
+      const { x, y } = getLogicalCoordinates(e);
+      if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return;
+      populateForms(x, y);
+    });
+
+    // Función para cambiar el color completo de un píxel (se utiliza al enviar el formulario)
+    function changePixelColor(x, y) {
+      const color = colorPicker.value;
+      const r = parseInt(color.substr(1, 2), 16);
+      const g = parseInt(color.substr(3, 2), 16);
+      const b = parseInt(color.substr(5, 2), 16);
+      const imgData = ctx.getImageData(x, y, 1, 1);
+      imgData.data[0] = r;
+      imgData.data[1] = g;
+      imgData.data[2] = b;
+      imgData.data[3] = 255;
+      ctx.putImageData(imgData, x, y);
+    }
+
+    // Función para cambiar un solo componente de color de un píxel
+    function changePixelComponent(x, y, component, value) {
+      const imgData = ctx.getImageData(x, y, 1, 1);
+      const componentMap = { red: 0, green: 1, blue: 2, alpha: 3 };
+      const idx = componentMap[component];
+      imgData.data[idx] = value;
+      ctx.putImageData(imgData, x, y);
+    }
+
+    // Envío del formulario para cambiar el color completo de un píxel
+    pixelForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const x = parseInt(pixelX.value, 10);
+      const y = parseInt(pixelY.value, 10);
+      if (isNaN(x) || isNaN(y) || x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) {
+        alert("Por favor, ingresa coordenadas de píxel válidas dentro de los límites del lienzo.");
+        return;
+      }
+      changePixelColor(x, y);
+    });
+    
+    // Función para cambiar el color de una fila o columna completa
+    function changeLineOrColumn(mode, coordinate) {
+      const color = colorPicker.value;
+      const r = parseInt(color.substr(1, 2), 16);
+      const g = parseInt(color.substr(3, 2), 16);
+      const b = parseInt(color.substr(5, 2), 16);
+      if (mode === 'row') {
+        if (coordinate < 0 || coordinate >= canvas.height) {
+          alert("Coordenada de fila fuera de rango.");
+          return;
+        }
+        const imgData = ctx.getImageData(0, coordinate, canvas.width, 1);
+        for (let x = 0; x < canvas.width; x++) {
+          let index = x * 4;
+          imgData.data[index] = r;
+          imgData.data[index + 1] = g;
+          imgData.data[index + 2] = b;
+          imgData.data[index + 3] = 255;
+        }
+        ctx.putImageData(imgData, 0, coordinate);
+      } else if (mode === 'column') {
+        if (coordinate < 0 || coordinate >= canvas.width) {
+          alert("Coordenada de columna fuera de rango.");
+          return;
+        }
+        const imgData = ctx.getImageData(coordinate, 0, 1, canvas.height);
+        for (let y = 0; y < canvas.height; y++) {
+          let index = y * 4;
+          imgData.data[index] = r;
+          imgData.data[index + 1] = g;
+          imgData.data[index + 2] = b;
+          imgData.data[index + 3] = 255;
+        }
+        ctx.putImageData(imgData, coordinate, 0);
+      }
+    }
+    
+    // Envío del formulario para cambiar una fila o columna
+    lineColumnForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const mode = modeSelect.value;
+      const coordinate = parseInt(coordinateInput.value, 10);
+      if (isNaN(coordinate)) {
+        alert("Por favor, ingresa una coordenada válida.");
+        return;
+      }
+      changeLineOrColumn(mode, coordinate);
+    });
+
+    // Envío del formulario para cambiar un solo componente de color
+    componentForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const x = parseInt(compPixelX.value, 10);
+      const y = parseInt(compPixelY.value, 10);
+      const component = componentSelect.value;
+      const value = parseInt(componentValue.value, 10);
+      if (isNaN(x) || isNaN(y) || x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) {
+        alert("Por favor, ingresa coordenadas de píxel válidas dentro de los límites del lienzo.");
+        return;
+      }
+      if (isNaN(value) || value < 0 || value > 255) {
+        alert("Por favor, ingresa un valor válido entre 0 y 255 para el componente de color.");
+        return;
+      }
+      changePixelComponent(x, y, component, value);
+    });
+  </script>
+</body>
+</html>
